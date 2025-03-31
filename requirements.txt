@@ -1,0 +1,5 @@
+torch
+torch_geometric
+# Add other potential dependencies like numpy, scikit-learn later if needed
+numpy
+scikit-learn
