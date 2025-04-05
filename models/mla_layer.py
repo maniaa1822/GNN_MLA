@@ -2,7 +2,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import MessagePassing
+from torch_geometric.nn import MessagePassing, LayerNorm
 from torch_geometric.utils import softmax
 
 class MultiHeadLatentAttentionLayer(MessagePassing):
@@ -34,6 +34,11 @@ class MultiHeadLatentAttentionLayer(MessagePassing):
         self.w_dq = nn.Linear(in_channels, q_compression_dim, bias=False)
         self.w_uq = nn.Linear(q_compression_dim, out_channels, bias=False) # out_channels = num_heads * head_dim
 
+        # Layer Normalization
+        self.norm_q = nn.LayerNorm(q_compression_dim)
+        self.norm_kv = nn.LayerNorm(kv_compression_dim)
+        self.norm_out = nn.LayerNorm(out_channels)  # Add normalization for output
+
         # Output Projection (Eq 11)
         self.w_o = nn.Linear(out_channels, out_channels) # Project concatenated heads back
 
@@ -58,6 +63,10 @@ class MultiHeadLatentAttentionLayer(MessagePassing):
         # 1. Project x to get compressed latent vectors (Eq 1, 6)
         c_kv = self.w_dkv(x) # [N, kv_compression_dim]
         c_q = self.w_dq(x)   # [N, q_compression_dim]
+        
+        # Apply Layer Normalization to compressed latent vectors
+        c_kv = self.norm_kv(c_kv)
+        c_q = self.norm_q(c_q)
 
         # 2. Up-project latent vectors to get full Q, K, V per head (Eq 2, 5, 7)
         # Note: We omit k_R and q_R as we are not using RoPE
@@ -74,9 +83,13 @@ class MultiHeadLatentAttentionLayer(MessagePassing):
         # propagate arguments are passed to message(), aggregate(), and update()
         out = self.propagate(edge_index, q=q, k=k, v=v, size=None) # size=None lets PyG infer N
 
-        # 4. Apply output projection (Eq 11)
         # Concatenate heads: out has shape [N, num_heads, head_dim] -> [N, out_channels]
         out = out.view(N, self.out_channels)
+        
+        # Apply output normalization before projection
+        out = self.norm_out(out)
+        
+        # 4. Apply output projection (Eq 11)
         out = self.w_o(out)
 
         return out

@@ -5,9 +5,10 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 import json # For saving loss history
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from data.load_data import load_node_classification_data
-from models.gnn_model import GNNModelWithMLA, GNNModelBaseline # Import both models
+from models.gnn_model import GNNModelWithMLA, GNNModelBaseline, GATModelBaseline # Import all three models
 from utils.utils import accuracy
 
 # Function to count parameters
@@ -20,21 +21,23 @@ parser.add_argument('--no-cuda', action='store_true', default=False, help='Disab
 parser.add_argument('--seed', type=int, default=42, help='Random seed.')
 parser.add_argument('--epochs', type=int, default=200, help='Number of epochs to train.')
 parser.add_argument('--lr', type=float, default=0.005, help='Initial learning rate.')
-parser.add_argument('--weight_decay', type=float, default=5e-4, help='Weight decay (L2 loss on parameters).')
-parser.add_argument('--hidden', type=int, default=64, help='Number of hidden units.')
-parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate (1 - keep probability).')
-parser.add_argument('--dataset', type=str, default='Cora', help='Dataset to use (Cora, CiteSeer, PubMed).')
+parser.add_argument('--weight_decay', type=float, default=0, help='Weight decay (L2 loss on parameters).')
+parser.add_argument('--hidden', type=int, default=16, help='Number of hidden units.') # Changed back to 64
+parser.add_argument('--dropout', type=float, default=0.2, help='Dropout rate (1 - keep probability).')
+parser.add_argument('--dataset', type=str, default='CiteSeer', help='Dataset to use (Cora, CiteSeer, PubMed).')
 parser.add_argument('--data_root', type=str, default='../data_cache', help='Directory for dataset cache.')
 # MLA specific args
-parser.add_argument('--num_heads', type=int, default=4, help='Number of attention heads in MLA.')
-parser.add_argument('--kv_compress_dim', type=int, default=32, help='KV compression dimension in MLA.')
-parser.add_argument('--q_compress_dim', type=int, default=32, help='Query compression dimension in MLA.')
+parser.add_argument('--num_heads', type=int, default=4, help='Number of attention heads in MLA.') # Increased from 2
+parser.add_argument('--kv_compress_dim', type=int, default=32, help='KV compression dimension in MLA.') # Increased from 16
+parser.add_argument('--q_compress_dim', type=int, default=32, help='Query compression dimension in MLA.') # Increased from 16
 parser.add_argument('--num_base_layers', type=int, default=1, help='Number of base GNN layers before MLA (used by MLA model).')
 parser.add_argument('--use_pos_enc', action='store_true', default=False, help='Whether to use positional encoding in MLA model.')
 # Model selection args
-parser.add_argument('--model_type', type=str, default='mla', choices=['mla', 'baseline'], help='Type of model to train (mla or baseline).')
-parser.add_argument('--baseline_layers', type=int, default=4, help='Number of layers for the baseline GNN model.')
-parser.add_argument('--equalize_params', action='store_true', default=False, help='Adjust model parameters to be approximately equal.')
+parser.add_argument('--model_type', type=str, default='mla', choices=['mla', 'gcn_baseline', 'gat_baseline'], help='Type of model to train (mla, gcn_baseline, gat_baseline).')
+parser.add_argument('--gcn_layers', type=int, default=2, help='Number of layers for the GCN baseline model.') # Renamed from baseline_layers, default 2
+parser.add_argument('--gat_layers', type=int, default=2, help='Number of layers for the GAT baseline model.') # Default 2
+parser.add_argument('--gat_heads', type=int, default=4, help='Number of attention heads for the GAT baseline model.') # Reduced from 8
+parser.add_argument('--equalize_params', action='store_true', default=False, help='Adjust model parameters (MLA, GCN, GAT) to be approximately equal.') # Updated help text
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -66,12 +69,15 @@ if args.equalize_params:
     # 3. Reducing number of attention heads
     args.num_heads = 4
     
-    # Increase baseline parameters by adding more layers
-    args.baseline_layers = 4
+    # Increase GCN baseline parameters by adding more layers
+    args.gcn_layers = 4 # Adjusted GCN layers
+    # Adjust GAT baseline parameters for comparable count
+    args.gat_layers = 3 # Increase layers similar to GCN
+    args.gat_heads = 1  # Reduce heads significantly to control parameter count
     
-    print("Parameter equalization enabled - adjusted model configurations")
+    print("Parameter equalization enabled - adjusted MLA, GCN, and GAT configurations (GAT layers=3, heads=1)")
 
-# Create both models to count parameters
+# Create all models to count parameters
 mla_model = GNNModelWithMLA(in_features=num_features,
                         hidden_channels=args.hidden,
                         out_features=num_classes,
@@ -86,13 +92,22 @@ mla_model = GNNModelWithMLA(in_features=num_features,
 baseline_model = GNNModelBaseline(in_features=num_features,
                          hidden_channels=args.hidden,
                          out_features=num_classes,
-                         num_layers=args.baseline_layers,
+                         num_layers=args.gcn_layers, # Use gcn_layers
                          dropout=args.dropout)
+
+gat_baseline_model = GATModelBaseline(in_features=num_features,
+                               hidden_channels=args.hidden,
+                               out_features=num_classes,
+                               num_layers=args.gat_layers,
+                               heads=args.gat_heads,
+                               dropout=args.dropout)
+
 
 # Compare model parameters
 print("\n--- Model Parameter Comparison ---")
 print(f"MLA Model Parameters: {count_parameters(mla_model):,}")
-print(f"Baseline Model Parameters: {count_parameters(baseline_model):,}")
+print(f"GCN Baseline Model Parameters: {count_parameters(baseline_model):,}")
+print(f"GAT Baseline Model Parameters: {count_parameters(gat_baseline_model):,}")
 print("--------------------------------\n")
 
 # Model and optimizer
@@ -113,15 +128,22 @@ if args.model_type == 'mla':
     print(f"MLA Q Dim: {args.q_compress_dim}")
     print(f"MLA Base Layers: {args.num_base_layers}")
     model = mla_model  # Use already created MLA model
-elif args.model_type == 'baseline':
-    print(f"Baseline Layers: {args.baseline_layers}")
-    model = baseline_model  # Use already created baseline model
+elif args.model_type == 'gcn_baseline':
+    print(f"GCN Baseline Layers: {args.gcn_layers}")
+    model = baseline_model  # Use already created GCN baseline model
+elif args.model_type == 'gat_baseline':
+    print(f"GAT Baseline Layers: {args.gat_layers}")
+    print(f"GAT Baseline Heads: {args.gat_heads}")
+    model = gat_baseline_model # Use already created GAT baseline model
 else:
     raise ValueError(f"Unknown model type: {args.model_type}")
 
-print(f"Number of parameters in {args.model_type.upper()} model: {count_parameters(model):,}")
+print(f"Number of parameters in selected {args.model_type.upper()} model: {count_parameters(model):,}")
 
 optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+
+# Learning rate scheduler for better stability
+scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.5, patience=5, verbose=True)
 
 if args.cuda:
     print("Moving model and data to CUDA device.")
@@ -172,7 +194,7 @@ t_total = time.time()
 print(f"\n--- Starting Training: {args.model_type.upper()} Model ---")
 best_val_loss = float('inf')
 epochs_no_improve = 0
-patience = 10 # Example patience for early stopping
+patience = 50 # Example patience for early stopping
 
 # Lists to store loss history
 train_losses = []
@@ -183,23 +205,26 @@ for epoch in range(args.epochs):
     train_losses.append(loss_train_epoch)
     val_losses.append(loss_val_epoch)
 
+    # Learning rate scheduling
+    scheduler.step(loss_val_epoch)
+
     # Simple early stopping based on validation loss
-    # if loss_val_epoch < best_val_loss:
-    #     best_val_loss = val_loss
-    #     epochs_no_improve = 0
-    #     # Optionally save the best model
-    #     # torch.save(model.state_dict(), f'{args.model_type}_best_model.pth')
-    # else:
-    #     epochs_no_improve += 1
-    # if epochs_no_improve == patience:
-    #     print(f"Early stopping triggered after {epoch+1} epochs.")
-    #     break
+    if loss_val_epoch < best_val_loss:
+        best_val_loss = loss_val_epoch # Corrected variable name
+        epochs_no_improve = 0
+        # Optionally save the best model
+        # torch.save(model.state_dict(), f'{args.model_type}_best_model.pth')
+    else:
+        epochs_no_improve += 1
+    if epochs_no_improve == patience:
+        print(f"Early stopping triggered after {epoch+1} epochs.")
+        break
 
 print(f"\n--- Optimization Finished: {args.model_type.upper()} Model ---")
 print(f"Total training time: {time.time() - t_total:.4f}s")
 
 # Load best model if early stopping was used and model saved
-# if epochs_no_improve == patience:
+# if epochs_no_improve == patience: # Keep this commented unless saving/loading best model is implemented
 #     print("Loading best model for testing...")
 #     model.load_state_dict(torch.load(f'{args.model_type}_best_model.pth'))
 
