@@ -16,7 +16,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau # Import scheduler
 # import numpy as np
 # import matplotlib.pyplot as plt
 
-from data.load_data import load_node_classification_data
+from load_data import load_node_classification_data
 # Import all models
 from models.gnn_model import GNNModelWithMLA, GNNModelBaseline, GATModelBaseline, GNNModelOnlyMLA
 from utils.utils import accuracy

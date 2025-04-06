@@ -4,7 +4,7 @@ import argparse
 from collections import OrderedDict
 
 from models.gnn_model import GNNModelWithMLA, GNNModelBaseline
-from data.load_data import load_node_classification_data
+from load_data import load_node_classification_data
 
 def count_parameters(model):
     """Count trainable parameters in a model"""

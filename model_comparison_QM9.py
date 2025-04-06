@@ -12,7 +12,7 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.data import Dataset
 
 # Assuming load_data is correctly modified in data.load_data
-from data.load_data import load_data
+from load_data import load_data
 # Import the new QM9 models
 from models.gnn_model import QM9GraphRegGAT, QM9GraphRegMLA
 

@@ -7,7 +7,7 @@ import numpy as np
 import json # For saving loss history
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-from data.load_data import load_node_classification_data
+from load_data import load_node_classification_data
 from models.gnn_model import GNNModelWithMLA, GNNModelBaseline, GATModelBaseline # Import all three models
 from utils.utils import accuracy
 
