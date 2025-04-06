@@ -223,11 +223,12 @@ def plot_comparison(results_dict, dataset_name, save_path=None, param_counts=Non
 
 def main():
     parser = argparse.ArgumentParser(description='Compare MLA and Baseline GNN models with similar parameter counts')
-    parser.add_argument('--dataset', type=str, default='CiteSeer', choices=['Cora', 'CiteSeer', 'PubMed'], help='Dataset to use')
-    parser.add_argument('--hidden', type=int, default=16, help='Hidden dimension') # Changed from 8 to 64
-    parser.add_argument('--epochs', type=int, default=200, help='Maximum number of epochs') # Changed from 50 to 200
-    parser.add_argument('--patience', type=int, default=50, help='Early stopping patience') # Changed from 50 to 10
-    parser.add_argument('--lr', type=float, default=0.002, help='Learning rate')
+    parser.add_argument('--dataset', type=str, default='Flickr', 
+                      help='Dataset to use (Cora, CiteSeer, PubMed, Flickr, Reddit, ogbn-arxiv).')
+    parser.add_argument('--hidden', type=int, default=128, help='Hidden dimension') # Changed from 8 to 64
+    parser.add_argument('--epochs', type=int, default=50, help='Maximum number of epochs') # Changed from 50 to 200
+    parser.add_argument('--patience', type=int, default=200, help='Early stopping patience') # Changed from 50 to 10
+    parser.add_argument('--lr', type=float, default=0.005, help='Learning rate')
     parser.add_argument('--dropout', type=float, default=0.2, help='Dropout rate') # Changed from 0.6 to 0.5
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA')
@@ -235,20 +236,20 @@ def main():
     
     # Model specific arguments
     parser.add_argument('--num_heads', type=int, default=4, help='Number of attention heads for MLA') # Kept at 4 (matches train.py)
-    parser.add_argument('--kv_compress_dim', type=int, default=32, help='KV compression dimension for MLA') # Changed from 16 to 32
-    parser.add_argument('--q_compress_dim', type=int, default=32, help='Q compression dimension for MLA') # Changed from 16 to 32
+    parser.add_argument('--kv_compress_dim', type=int, default=64, help='KV compression dimension for MLA') # Changed from 16 to 32
+    parser.add_argument('--q_compress_dim', type=int, default=64, help='Q compression dimension for MLA') # Changed from 16 to 32
     parser.add_argument('--gcn_layers', type=int, default=2, help='Number of layers for GCN baseline') # Renamed from baseline_layers, default 2
     parser.add_argument('--gat_layers', type=int, default=2, help='Number of layers for GAT baseline')
-    parser.add_argument('--gat_heads', type=int, default=1, help='Number of attention heads for GAT baseline')
+    parser.add_argument('--gat_heads', type=int, default=2, help='Number of attention heads for GAT baseline')
     parser.add_argument('--mla_only_layers', type=int, default=2, help='Number of layers for MLA Only model') # Added for MLA Only
     parser.add_argument('--use_pos_enc', action='store_true', default=False, help='Use positional encoding in MLA models')
     parser.add_argument('--skip_train', action='store_true', default=False, help='Skip training and only plot existing results')
     # New arguments
-    parser.add_argument('--no-grad-clip', action='store_true', default=False, help='Disable gradient clipping during training.')
-    parser.add_argument('--use-lr-scheduler', action='store_true', default=True, help='Enable ReduceLROnPlateau learning rate scheduler.')
+    parser.add_argument('--no-grad-clip', action='store_true', default=True, help='Disable gradient clipping during training.')
+    parser.add_argument('--use-lr-scheduler', action='store_true', default=False, help='Enable ReduceLROnPlateau learning rate scheduler.')
     all_model_choices = ['mla',
-                          'gcn_baseline',
-                            'gat_baseline',
+                          #'gcn_baseline',
+                            #'gat_baseline',
                              # 'mla_only'
                               ]
     parser.add_argument('--models-to-compare', nargs='+', default=all_model_choices, choices=all_model_choices,
@@ -351,7 +352,7 @@ def main():
                 data=data,
                 optimizer=optimizer_to_use,
                 epochs=args.epochs,
-                patience=args.patience,
+                patience=args.patience,  # Ensure patience is correctly passed from command line args
                 model_name=model_labels_print.get(model_name, model_name),
                 device=device,
                 use_clipping=use_clipping, # Pass clipping flag

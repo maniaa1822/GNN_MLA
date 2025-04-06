@@ -24,7 +24,8 @@ parser.add_argument('--lr', type=float, default=0.005, help='Initial learning ra
 parser.add_argument('--weight_decay', type=float, default=0, help='Weight decay (L2 loss on parameters).')
 parser.add_argument('--hidden', type=int, default=16, help='Number of hidden units.') # Changed back to 64
 parser.add_argument('--dropout', type=float, default=0.2, help='Dropout rate (1 - keep probability).')
-parser.add_argument('--dataset', type=str, default='CiteSeer', help='Dataset to use (Cora, CiteSeer, PubMed).')
+parser.add_argument('--dataset', type=str, default='CiteSeer', 
+                      help='Dataset to use (Cora, CiteSeer, PubMed, Flickr, Reddit, ogbn-arxiv).')
 parser.add_argument('--data_root', type=str, default='../data_cache', help='Directory for dataset cache.')
 # MLA specific args
 parser.add_argument('--num_heads', type=int, default=4, help='Number of attention heads in MLA.') # Increased from 2
