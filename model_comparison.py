@@ -223,7 +223,7 @@ def plot_comparison(results_dict, dataset_name, save_path=None, param_counts=Non
 
 def main():
     parser = argparse.ArgumentParser(description='Compare MLA and Baseline GNN models with similar parameter counts')
-    parser.add_argument('--dataset', type=str, default='Flickr', 
+    parser.add_argument('--dataset', type=str, default='CiteSeer', 
                       help='Dataset to use (Cora, CiteSeer, PubMed, Flickr, Reddit, ogbn-arxiv).')
     parser.add_argument('--hidden', type=int, default=128, help='Hidden dimension') # Changed from 8 to 64
     parser.add_argument('--epochs', type=int, default=50, help='Maximum number of epochs') # Changed from 50 to 200

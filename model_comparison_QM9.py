@@ -14,7 +14,7 @@ from torch_geometric.data import Dataset
 # Assuming load_data is correctly modified in data.load_data
 from load_data import load_data
 # Import the new QM9 models
-from models.gnn_model import QM9GraphRegGAT, QM9GraphRegMLA
+from models.gnn_model import QM9GraphRegGAT, QM9GraphRegMLA, QM9GraphRegMLA_NoBases
 
 # Function to count parameters
 def count_parameters(model):
@@ -81,8 +81,16 @@ def plot_qm9_comparison(results_dict, save_path=None, param_counts=None, target_
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12)) # Adjusted size
 
     # Define colors and labels for models
-    colors = {'GAT': 'r', 'MLA': 'b'} # Add more if other models are compared
-    labels = {'GAT': 'GAT Baseline', 'MLA': 'MLA'} # Add more if other models are compared
+    colors = {
+        'GAT': 'r', 
+        'MLA': 'b',
+        'MLA-NoBases': 'g'
+    }
+    labels = {
+        'GAT': 'GAT Baseline', 
+        'MLA': 'MLA with GCN Base',
+        'MLA-NoBases': 'MLA without GCN Base'
+    }
 
     for model_type, results in results_dict.items():
         if results is None or not all(k in results for k in ['train_losses', 'val_losses', 'train_maes', 'val_maes']):
@@ -157,11 +165,11 @@ def main():
     parser = argparse.ArgumentParser(description='QM9 Graph Regression Comparison (GAT vs MLA)')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA training.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed.')
-    parser.add_argument('--epochs', type=int, default=100, help='Number of epochs to train.')
+    parser.add_argument('--epochs', type=int, default=3, help='Number of epochs to train.')
     parser.add_argument('--lr', type=float, default=0.001, help='Initial learning rate.')
     parser.add_argument('--weight_decay', type=float, default=0, help='Weight decay (L2 loss on parameters).')
     parser.add_argument('--batch_size', type=int, default=128, help='Batch size for training.')
-    parser.add_argument('--hidden', type=int, default=32, help='Number of hidden units.') # Reduced default
+    parser.add_argument('--hidden', type=int, default=8, help='Number of hidden units.') # Reduced default
     parser.add_argument('--dropout', type=float, default=0.2, help='Dropout rate.')
     parser.add_argument('--data_root', type=str, default='../data_cache', help='Directory for dataset cache.')
     # GAT specific args
@@ -169,11 +177,12 @@ def main():
     parser.add_argument('--gat_heads', type=int, default=4, help='Number of attention heads for the GAT model.') # Reduced default
     # MLA specific args
     parser.add_argument('--mla_heads', type=int, default=2, help='Number of attention heads in MLA.') # Reduced default
-    parser.add_argument('--mla_kv_dim', type=int, default=16, help='KV compression dimension in MLA.') # Reduced default
-    parser.add_argument('--mla_q_dim', type=int, default=16, help='Query compression dimension in MLA.') # Reduced default
+    parser.add_argument('--mla_kv_dim', type=int, default=8, help='KV compression dimension in MLA.') # Reduced default
+    parser.add_argument('--mla_q_dim', type=int, default=8, help='Query compression dimension in MLA.') # Reduced default
     parser.add_argument('--mla_base_layers', type=int, default=1, help='Number of base GNN layers before MLA.')
     parser.add_argument('--mla_layers', type=int, default=1, help='Number of MLA layers.')
-    parser.add_argument('--target_indices', type=int, nargs='+', default=[1 + 2],
+    parser.add_argument('--mla_nobases_layers', type=int, default=2, help='Number of MLA layers in the MLA-NoBases model.')
+    parser.add_argument('--target_indices', type=int, nargs='+', default=[1,2,3],
                         help='Indices of QM9 targets to predict (0-18). Predicts all if None.')
     parser.add_argument('--num_workers', type=int, default=4,
                         help='Number of workers for DataLoader.')
@@ -278,6 +287,16 @@ def main():
                               q_compression_dim=args.mla_q_dim,
                               num_base_layers=args.mla_base_layers,
                               num_mla_layers=args.mla_layers,
+                              dropout=args.dropout).to(device),
+        'MLA-NoBases': QM9GraphRegMLA_NoBases(
+                              node_feature_dim=num_node_features,
+                              edge_feature_dim=dataset_obj.num_edge_features,
+                              hidden_channels=args.hidden,
+                              out_features=num_selected_targets, # Use selected number of targets
+                              num_heads=args.mla_heads,
+                              kv_compression_dim=args.mla_kv_dim,
+                              q_compression_dim=args.mla_q_dim,
+                              num_mla_layers=args.mla_nobases_layers,
                               dropout=args.dropout).to(device)
     }
 

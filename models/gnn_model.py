@@ -380,3 +380,63 @@ class QM9GraphRegMLA(nn.Module):
         # Apply output layer
         x = self.output_layer(x)
         return x
+
+
+class QM9GraphRegMLA_NoBases(nn.Module):
+    """An MLA model without base GCN layers for QM9 graph regression."""
+    def __init__(self, node_feature_dim, edge_feature_dim, hidden_channels=32, out_features=19,
+                 num_heads=2, kv_compression_dim=16, q_compression_dim=16,
+                 num_mla_layers=2, dropout=0.2):
+        super().__init__()
+        self.dropout = dropout
+        self.num_mla_layers = num_mla_layers
+        self.hidden_channels = hidden_channels
+
+        # Node Embedding
+        self.node_emb = Embedding(100, hidden_channels)  # Embedding for atom types
+
+        # Use MLA layers directly without base GCN layers
+        self.mla_layers = nn.ModuleList()
+        self.norms = nn.ModuleList()
+        
+        # For the first layer, input is from node embedding
+        current_dim = hidden_channels
+        
+        for _ in range(num_mla_layers):
+            self.mla_layers.append(MultiHeadLatentAttentionLayer(
+                in_channels=current_dim,
+                out_channels=hidden_channels,
+                num_heads=num_heads,
+                kv_compression_dim=kv_compression_dim,
+                q_compression_dim=q_compression_dim,
+                dropout=dropout
+            ))
+            self.norms.append(nn.LayerNorm(hidden_channels))
+            current_dim = hidden_channels
+
+        # Graph pooling layer
+        self.pool = global_add_pool
+
+        # Output linear layer for targets
+        self.output_layer = Linear(hidden_channels, out_features)
+
+    def forward(self, data):
+        x, edge_index, batch = data.x, data.edge_index, data.batch
+
+        # Node Embedding - Use only the first feature (atom type)
+        x = self.node_emb(x[:, 0].long())
+        
+        # Apply MLA layers with residuals
+        for i in range(self.num_mla_layers):
+            residual = x
+            x = self.mla_layers[i](x, edge_index)
+            x = self.norms[i](x + residual)  # Add residual and normalize
+            x = F.relu(x)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+
+        # Apply graph pooling
+        x = self.pool(x, batch)
+
+        # Apply output layer
+        x = self.output_layer(x)
+        return x

@@ -2,6 +2,9 @@ import torch
 from torch_geometric.datasets import Planetoid, Reddit, QM9 # Import QM9
 import torch_geometric.transforms as T
 import os.path as osp
+import os
+import numpy as np
+import scipy.sparse as sp
 
 def load_data(dataset_name, root=None):
     """
@@ -79,9 +82,11 @@ def load_data(dataset_name, root=None):
             transform = T.NormalizeFeatures()
             
             print(f"Loading {dataset_name} dataset. This may take a while...")
+
+            # Load using PyG's built-in Flickr dataset
             dataset = Flickr(root=osp.join(root, 'Flickr'), transform=transform)
             data = dataset[0]
-            
+
             print(f"Loaded {dataset_name} dataset:")
             print(f"  Nodes: {data.num_nodes}")
             print(f"  Edges: {data.num_edges}")
@@ -90,11 +95,11 @@ def load_data(dataset_name, root=None):
             print(f"  Train nodes: {data.train_mask.sum().item()}")
             print(f"  Val nodes: {data.val_mask.sum().item()}")
             print(f"  Test nodes: {data.test_mask.sum().item()}")
-            
+
             return data, data.num_features, dataset.num_classes
-            
+
         except Exception as e:
-            print(f"Error loading Flickr dataset: {e}")
+            print(f"Error loading Flickr dataset with PyG loader: {e}") # Modified error message
             return None, None, None
             
     # OGB Datasets support
@@ -181,3 +186,33 @@ def load_data(dataset_name, root=None):
     else:
         print(f"Dataset '{dataset_name}' is not supported. Choose from: Cora, CiteSeer, PubMed, Reddit, Flickr, ogbn-arxiv, QM9")
         return None, None, None, None
+
+# Helper function for node classification datasets
+def load_node_classification_data(dataset_name, root=None):
+    """
+    Load a node classification dataset.
+    This is a wrapper around load_data that's specifically for node classification tasks.
+    
+    Args:
+        dataset_name (str): Name of dataset ('Cora', 'CiteSeer', 'PubMed', 'Reddit', 'Flickr', 'ogbn-arxiv', etc.)
+        root (str, optional): Root directory where the dataset should be saved.
+    
+    Returns:
+        data: A PyG Data object containing the graph
+        num_features: Number of input node features
+        num_classes: Number of output classes
+    """
+    if dataset_name == 'QM9':
+        print("QM9 is a graph regression dataset, not a node classification dataset.")
+        print("Please use load_data() directly for QM9.")
+        return None, None, None
+        
+    result = load_data(dataset_name, root)
+    
+    # Handle the case where result might have 4 items for datasets like QM9
+    if isinstance(result, tuple) and len(result) >= 3:
+        data, num_features, num_classes = result[:3]
+        return data, num_features, num_classes
+    else:
+        # Error case or None returned
+        return None, None, None
