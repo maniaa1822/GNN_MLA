@@ -165,10 +165,10 @@ def main():
     parser = argparse.ArgumentParser(description='QM9 Graph Regression Comparison (GAT vs MLA)')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA training.')
     parser.add_argument('--seed', type=int, default=42, help='Random seed.')
-    parser.add_argument('--epochs', type=int, default=3, help='Number of epochs to train.')
+    parser.add_argument('--epochs', type=int, default=50, help='Number of epochs to train.')
     parser.add_argument('--lr', type=float, default=0.001, help='Initial learning rate.')
     parser.add_argument('--weight_decay', type=float, default=0, help='Weight decay (L2 loss on parameters).')
-    parser.add_argument('--batch_size', type=int, default=128, help='Batch size for training.')
+    parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training.')
     parser.add_argument('--hidden', type=int, default=8, help='Number of hidden units.') # Reduced default
     parser.add_argument('--dropout', type=float, default=0.2, help='Dropout rate.')
     parser.add_argument('--data_root', type=str, default='../data_cache', help='Directory for dataset cache.')
@@ -184,7 +184,7 @@ def main():
     parser.add_argument('--mla_nobases_layers', type=int, default=2, help='Number of MLA layers in the MLA-NoBases model.')
     parser.add_argument('--target_indices', type=int, nargs='+', default=[1,2,3],
                         help='Indices of QM9 targets to predict (0-18). Predicts all if None.')
-    parser.add_argument('--num_workers', type=int, default=4,
+    parser.add_argument('--num_workers', type=int, default=2,
                         help='Number of workers for DataLoader.')
     parser.add_argument('--skip_train', action='store_true', default=False,
                         help='Skip training and only plot existing results') # Added skip_train
