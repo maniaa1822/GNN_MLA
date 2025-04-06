@@ -4,6 +4,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
+import matplotlib.pyplot as plt # Added for plotting
+import os # Added for path joining
 import os.path as osp
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch_geometric.loader import DataLoader
@@ -30,11 +32,12 @@ def calculate_unnormalized_mae(predictions, targets, target_stds):
     # Average across all targets and samples in the batch/epoch
     return unnormalized_mae_per_target.mean().item()
 
-# --- Modified train/evaluate functions to select targets ---
+# --- Modified train/evaluate functions to select targets and return MAE ---
 
-def train_epoch(model, loader, criterion, optimizer, device, target_indices_tensor):
+def train_epoch(model, loader, criterion, optimizer, selected_target_stds, device, target_indices_tensor):
     model.train()
     total_loss = 0
+    total_mae = 0
     for batch in loader:
         batch = batch.to(device)
         # Select target columns
@@ -44,8 +47,13 @@ def train_epoch(model, loader, criterion, optimizer, device, target_indices_tens
         loss = criterion(out, targets) # Compare with selected targets
         loss.backward()
         optimizer.step()
+        # Calculate unnormalized MAE for the batch
+        mae = calculate_unnormalized_mae(out.detach(), targets, selected_target_stds) # Use detach() for MAE calc
         total_loss += loss.item() * batch.num_graphs
-    return total_loss / len(loader.dataset)
+        total_mae += mae * batch.num_graphs # Accumulate unnormalized MAE
+    avg_loss = total_loss / len(loader.dataset)
+    avg_mae = total_mae / len(loader.dataset)
+    return avg_loss, avg_mae
 
 @torch.no_grad()
 def evaluate(model, loader, criterion, selected_target_stds, device, target_indices_tensor):
@@ -65,6 +73,83 @@ def evaluate(model, loader, criterion, selected_target_stds, device, target_indi
     avg_loss = total_loss / len(loader.dataset)
     avg_mae = total_mae / len(loader.dataset)
     return avg_loss, avg_mae
+
+
+# --- Plotting Function (Adapted from model_comparison.py) ---
+def plot_qm9_comparison(results_dict, save_path=None, param_counts=None, target_indices=None):
+    """Plot comparison of performance metrics (Loss and MAE) for QM9 models"""
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12)) # Adjusted size
+
+    # Define colors and labels for models
+    colors = {'GAT': 'r', 'MLA': 'b'} # Add more if other models are compared
+    labels = {'GAT': 'GAT Baseline', 'MLA': 'MLA'} # Add more if other models are compared
+
+    for model_type, results in results_dict.items():
+        if results is None or not all(k in results for k in ['train_losses', 'val_losses', 'train_maes', 'val_maes']):
+            print(f"Skipping plotting for {model_type}: Missing history data.")
+            continue # Skip if results or history are missing
+
+        epochs = range(1, len(results['train_losses']) + 1)
+        color = colors.get(model_type, 'k') # Default to black if type unknown
+
+        # If parameter counts are provided, include them in the label
+        if param_counts and model_type in param_counts:
+            label = f"{labels.get(model_type, model_type)} ({param_counts[model_type]:,} params)"
+        else:
+            label = labels.get(model_type, model_type)
+
+        # Plotting: Train Loss, Val Loss, Train MAE, Val MAE
+        ax1.plot(epochs, results['train_losses'], color=color, linestyle='-', label=label)
+        ax2.plot(epochs, results['val_losses'], color=color, linestyle='-', label=label)
+        ax3.plot(epochs, results['train_maes'], color=color, linestyle='-', label=label)
+        ax4.plot(epochs, results['val_maes'], color=color, linestyle='-', label=label)
+
+    ax1.set_title('Training Loss (Normalized)')
+    ax1.set_xlabel('Epochs')
+    ax1.set_ylabel('Loss')
+    ax1.legend()
+    ax1.grid(True)
+
+    ax2.set_title('Validation Loss (Normalized)')
+    ax2.set_xlabel('Epochs')
+    ax2.set_ylabel('Loss')
+    ax2.legend()
+    ax2.grid(True)
+
+    ax3.set_title('Training MAE (Unnormalized)')
+    ax3.set_xlabel('Epochs')
+    ax3.set_ylabel('MAE')
+    ax3.legend()
+    ax3.grid(True)
+
+    ax4.set_title('Validation MAE (Unnormalized)')
+    ax4.set_xlabel('Epochs')
+    ax4.set_ylabel('MAE')
+    ax4.legend()
+    ax4.grid(True)
+
+    plt.tight_layout()
+
+    # Construct title
+    title_parts = ["QM9 Performance Comparison"]
+    if target_indices:
+        title_parts.append(f"(Targets: {target_indices})")
+    if param_counts:
+        title_parts.append("(Equalized Parameters approx.)") # Assuming params are roughly equalized
+    plt.suptitle(' '.join(title_parts), fontsize=16)
+
+    plt.subplots_adjust(top=0.92) # Adjust title position
+
+    if save_path:
+        # Ensure directory exists if save_path includes directories
+        save_dir = os.path.dirname(save_path)
+        if save_dir and not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        plt.savefig(save_path)
+        print(f"Plot saved to {save_path}")
+    else:
+        plt.show()
+    plt.close(fig) # Close the figure after saving/showing
 
 
 def main():
@@ -88,10 +173,12 @@ def main():
     parser.add_argument('--mla_q_dim', type=int, default=16, help='Query compression dimension in MLA.') # Reduced default
     parser.add_argument('--mla_base_layers', type=int, default=1, help='Number of base GNN layers before MLA.')
     parser.add_argument('--mla_layers', type=int, default=1, help='Number of MLA layers.')
-    parser.add_argument('--target_indices', type=int, nargs='+', default=None,
+    parser.add_argument('--target_indices', type=int, nargs='+', default=[1 + 2],
                         help='Indices of QM9 targets to predict (0-18). Predicts all if None.')
     parser.add_argument('--num_workers', type=int, default=4,
                         help='Number of workers for DataLoader.')
+    parser.add_argument('--skip_train', action='store_true', default=False,
+                        help='Skip training and only plot existing results') # Added skip_train
 
     args = parser.parse_args()
     args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -204,65 +291,156 @@ def main():
         print(f"{name}: {count_parameters(model):,} parameters")
     print("----------------------------\n")
 
+    # --- Training or Loading Results ---
+    results_file = f"QM9_comparison_results_{'_'.join(sorted(models_to_train.keys()))}.npz"
+    param_counts_dict = {name: count_parameters(model) for name, model in models_to_train.items()} # Store param counts
 
-    # Training loop for each model
-    for model_name, model in models_to_train.items():
-        print(f"--- Training {model_name} Model ---")
-        optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True)
+    if not args.skip_train:
+        print(f"\n--- Starting Training Loop ---")
+        results = {} # Initialize results dict
+        # Training loop for each model
+        for model_name, model in models_to_train.items():
+            print(f"--- Training {model_name} Model ---")
+            optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+            scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, verbose=True)
 
-        best_val_mae = float('inf')
-        epochs_no_improve = 0
-        patience = 30 # Early stopping patience
+            best_val_mae = float('inf')
+            epochs_no_improve = 0
+            patience = 30 # Early stopping patience
+            best_model_state = None
 
-        t_start_train = time.time()
-        for epoch in range(args.epochs):
-            t_epoch_start = time.time()
-            # Pass target_indices_tensor to train_epoch
-            train_loss = train_epoch(model, train_loader, criterion, optimizer, device, target_indices_tensor)
+            # History tracking
+            train_losses, val_losses, train_maes, val_maes = [], [], [], []
+
+            t_start_train = time.time()
+            for epoch in range(args.epochs):
+                t_epoch_start = time.time()
+                # Pass selected_target_stds and target_indices_tensor to train_epoch
+                train_loss, train_mae = train_epoch(model, train_loader, criterion, optimizer, selected_target_stds, device, target_indices_tensor)
+                # Pass selected_target_stds and target_indices_tensor to evaluate
+                val_loss, val_mae = evaluate(model, val_loader, criterion, selected_target_stds, device, target_indices_tensor)
+                epoch_time = time.time() - t_epoch_start
+
+                # Store history
+                train_losses.append(train_loss)
+                val_losses.append(val_loss)
+                train_maes.append(train_mae)
+                val_maes.append(val_mae)
+
+                print(f'Epoch: {epoch+1:03d}, Train Loss: {train_loss:.4f}, Train MAE: {train_mae:.4f}, '
+                      f'Val Loss: {val_loss:.4f}, Val MAE: {val_mae:.4f}, Time: {epoch_time:.2f}s')
+
+                scheduler.step(val_mae) # Step scheduler based on unnormalized MAE
+
+                # Early stopping
+                if val_mae < best_val_mae:
+                    best_val_mae = val_mae
+                    epochs_no_improve = 0
+                    best_model_state = model.state_dict().copy() # Save best model state
+                    # Optionally save best model state to file immediately
+                    # torch.save(model.state_dict(), f'qm9_{model_name}_best.pth')
+                else:
+                    epochs_no_improve += 1
+
+                if epochs_no_improve >= patience:
+                    print(f"Early stopping triggered for {model_name} after {epoch+1} epochs.")
+                    break
+
+            train_time = time.time() - t_start_train
+            print(f"--- Finished Training {model_name} ({train_time:.2f}s) ---")
+
+            # Load best model state for testing
+            if best_model_state:
+                model.load_state_dict(best_model_state)
+                print("Loaded best model state for final evaluation.")
+            # Or load from file if saved immediately:
+            # if os.path.exists(f'qm9_{model_name}_best.pth'):
+            #     model.load_state_dict(torch.load(f'qm9_{model_name}_best.pth'))
+
+            # Final Test Evaluation
+            print(f"--- Evaluating {model_name} on Test Set ---")
             # Pass selected_target_stds and target_indices_tensor to evaluate
-            val_loss, val_mae = evaluate(model, val_loader, criterion, selected_target_stds, device, target_indices_tensor)
-            epoch_time = time.time() - t_epoch_start
+            test_loss, test_mae = evaluate(model, test_loader, criterion, selected_target_stds, device, target_indices_tensor)
+            print(f"Test Loss (Norm): {test_loss:.4f}")
+            print(f"Test MAE (Unnorm - selected targets): {test_mae:.4f}") # Clarify MAE is for selected targets
+            print("----------------------------------------\n")
 
-            print(f'Epoch: {epoch+1:03d}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, '
-                  f'Val MAE (Unnorm): {val_mae:.4f}, Time: {epoch_time:.2f}s')
+            # Store results including history
+            results[model_name] = {
+                'test_mae': test_mae,
+                'test_loss': test_loss,
+                'train_time': train_time,
+                'train_losses': train_losses,
+                'val_losses': val_losses,
+                'train_maes': train_maes,
+                'val_maes': val_maes,
+                'epochs_trained': len(train_losses)
+            }
 
-            scheduler.step(val_mae) # Step scheduler based on unnormalized MAE
+        # Save results after training all models
+        save_data = {
+            **results,
+            'parameters': param_counts_dict,
+            'config': vars(args)
+        }
+        np.savez(results_file, **save_data)
+        print(f"Results saved to {results_file}")
 
-            # Early stopping
-            if val_mae < best_val_mae:
-                best_val_mae = val_mae
-                epochs_no_improve = 0
-                # Optionally save best model state
-                # torch.save(model.state_dict(), f'qm9_{model_name}_best.pth')
-            else:
-                epochs_no_improve += 1
+    else: # Skip training, load results
+        print(f"\n--- Skipping Training - Loading Results from {results_file} ---")
+        if osp.exists(results_file):
+            try:
+                loaded_data = np.load(results_file, allow_pickle=True)
+                # Load results only for the models defined in models_to_train
+                results = {}
+                loaded_successfully = False
+                for model_name in models_to_train.keys():
+                    if model_name in loaded_data:
+                        results[model_name] = loaded_data[model_name].item()
+                        loaded_successfully = True
 
-            if epochs_no_improve >= patience:
-                print(f"Early stopping triggered for {model_name} after {epoch+1} epochs.")
-                break
+                if loaded_successfully:
+                    print(f"Loaded results for {list(results.keys())}")
+                    # Load param counts if available in the file
+                    if 'parameters' in loaded_data:
+                         param_counts_dict = loaded_data['parameters'].item()
+                else:
+                    print(f"No results found for {list(models_to_train.keys())} in {results_file}")
+                    results = {} # Ensure results is empty if loading failed
 
-        train_time = time.time() - t_start_train
-        print(f"--- Finished Training {model_name} ({train_time:.2f}s) ---")
+            except Exception as e:
+                print(f"Error loading results: {e}")
+                results = {} # Ensure results is empty on error
+        else:
+            print(f"Results file not found: {results_file}. Cannot load results.")
+            results = {} # Ensure results is empty if file not found
 
-        # Load best model if saved
-        # if epochs_no_improve >= patience:
-        #     model.load_state_dict(torch.load(f'qm9_{model_name}_best.pth'))
+    # --- Plotting and Final Comparison (only if results exist) ---
+    if not results:
+        print("No results available to plot or compare. Exiting.")
+        return
 
-        # Final Test Evaluation
-        print(f"--- Evaluating {model_name} on Test Set ---")
-        # Pass selected_target_stds and target_indices_tensor to evaluate
-        test_loss, test_mae = evaluate(model, test_loader, criterion, selected_target_stds, device, target_indices_tensor)
-        print(f"Test Loss (Norm): {test_loss:.4f}")
-        print(f"Test MAE (Unnorm - selected targets): {test_mae:.4f}") # Clarify MAE is for selected targets
-        print("----------------------------------------\n")
-        results[model_name] = {'test_mae': test_mae, 'test_loss': test_loss, 'train_time': train_time}
+    # Plot comparison
+    plot_save_path = f"QM9_comparison_plot_{'_'.join(sorted(results.keys()))}.png"
+    plot_qm9_comparison(results, plot_save_path, param_counts=param_counts_dict, target_indices=target_indices)
 
     # Print final comparison
-    print("--- Final Comparison Results (Test Set) ---")
+    print("\n--- Final Comparison Results (Test Set MAE - Unnormalized) ---")
+    best_model_name = None
+    best_mae = float('inf')
     for name, metrics in results.items():
-        print(f"{name}: MAE (Unnorm) = {metrics['test_mae']:.4f}, Loss (Norm) = {metrics['test_loss']:.4f}, Time = {metrics['train_time']:.2f}s")
-    print("-------------------------------------------")
+        mae = metrics.get('test_mae', float('inf')) # Use .get for safety if loading partial results
+        loss = metrics.get('test_loss', float('inf'))
+        time_val = metrics.get('train_time', float('nan'))
+        print(f"{name}: MAE = {mae:.4f}, Loss = {loss:.4f}, Time = {time_val:.2f}s")
+        if mae < best_mae:
+            best_mae = mae
+            best_model_name = name
+
+    if best_model_name:
+        print(f"\nBest performing model (lowest MAE): {best_model_name} ({best_mae:.4f})")
+    print("----------------------------------------------------------")
+
 
 if __name__ == '__main__':
     main()
